@@ -236,7 +236,7 @@ describe("convertToGeminiMessages", () => {
       });
     });
 
-    it("uses skip_thought_signature_validator for Gemini 3 without signature", () => {
+    it("uses skip_thought_signature_validator and includes id for Gemini 3 without signature", () => {
       const messages: Message[] = [
         assistant({
           content: [{ type: "toolCall", id: "tc-1", name: "read", arguments: {} }],
@@ -244,7 +244,7 @@ describe("convertToGeminiMessages", () => {
       ];
       const result = convertToGeminiMessages(messages, "gemini-3-pro");
       expect(result[0].parts[0]).toEqual({
-        functionCall: { name: "read", args: {} },
+        functionCall: { id: "tc-1", name: "read", args: {} },
         thoughtSignature: "skip_thought_signature_validator",
       });
     });
@@ -310,7 +310,7 @@ describe("convertToGeminiMessages", () => {
       expect(result[0].parts[0].functionResponse.response.output).toBe("");
     });
 
-    it("includes image toolResult parts inside Gemini 3 functionResponse", () => {
+    it("includes image toolResult parts and id inside Gemini 3 functionResponse", () => {
       const messages: Message[] = [
         toolResult("tc-1", "screenshot", [
           { type: "text", text: "screen" },
@@ -324,6 +324,7 @@ describe("convertToGeminiMessages", () => {
           parts: [
             {
               functionResponse: {
+                id: "tc-1",
                 name: "screenshot",
                 response: { output: "screen" },
                 parts: [{ inlineData: { mimeType: "image/png", data: "base64img" } }],

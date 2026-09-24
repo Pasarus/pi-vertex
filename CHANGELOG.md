@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.3] - 2026-09-24
+### Fixed
+- **Claude adaptive thinking for Claude 4.6+, 4.7+, 4.8, 5+**: Fixed `thinking.type.enabled is not supported for this model` 400 error by sending `{ type: "adaptive", display: "summarized" }` with `output_config: { effort }`. Added `isAdaptiveThinking` helper and set `adaptiveThinking: true` in publisher defaults so dynamically discovered Anthropic models automatically use adaptive thinking.
+- **Thinking block preservation in tool replay**: Assistant thinking blocks with thought signatures are now preserved across multi-turn tool replay even when thinking text is empty, preventing Anthropic 400 `thinking blocks cannot be modified` errors.
+- **Gemini 3 tool call IDs**: Implemented `requiresToolCallId(modelId)` to include `id` on `functionCall` and `functionResponse` for Gemini 3+ models, ensuring tool execution responses correlate correctly.
+- **Tool schema sanitization**: Automatically strips `$schema`, `$id`, `$defs`, and other meta-declarations from tool definitions, preventing 400 invalid schema errors on Anthropic and Vertex Gemini endpoints.
+- **Multimodal tool results**: Replays image content blocks in `toolResult` messages for Claude and Gemini, enabling visual tool results to be passed back to models.
+- **Redacted thinking support**: Replays redacted thinking blocks as `{ type: "redacted_thinking", data: block.thinkingSignature }` for Anthropic.
+- **Tool arguments parsing**: Safely parses stringified tool call arguments before passing them as objects in Anthropic `tool_use.input`.
+- **Model ID matching with version tags**: `getModelById` and `buildModelConfigs` now match version-tagged models (e.g. `claude-opus-4-7@20260115`) by stripping `@version` when querying static metadata.
+
+### Changed
+- Rebranded package to `@pasarus/pi-vertex` under author Samuel Jones (`Pasarus/pi-vertex`).
+- Updated test suite with 11 new tests (104 total tests passing across 8 files).
+
 ## [2.1.2] - 2026-08-29
 ### Fixed
 - **`streamSimpleOpenAICompletions` is imported from `@earendil-works/pi-ai/compat`.** The bare specifier resolves to `pi-ai/dist/index.js` under plain Node, which does not re-export it — only pi's extension loader aliases root → compat (`getAliases()` for node mode, `VIRTUAL_MODULES` for the compiled binary). The previous top-level `require("@earendil-works/pi-ai")` therefore worked inside pi but threw `ERR_MODULE_NOT_FOUND: No "exports" main defined` under Node, which made `tests/streaming-maas.test.ts` impossible to collect. `/compat` is present in both pi maps *and* in pi-ai's `exports`, so the MaaS path is now importable everywhere and the loose hand-written function signature (plus its `eslint-disable` for `no-require-imports`) is gone — `tsc` type-checks the real call site.

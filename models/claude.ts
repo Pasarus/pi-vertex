@@ -13,6 +13,58 @@ import type { VertexModelConfig } from "../types.js";
 export const CLAUDE_MODELS: VertexModelConfig[] = [
   // Claude 5 series
   {
+    id: "claude-opus-5-5",
+    name: "Claude Opus 5.5",
+    apiId: "claude-opus-5-5",
+    publisher: "anthropic",
+    endpointType: "maas",
+    contextWindow: 1000000,
+    maxTokens: 128000,
+    input: ["text", "image"],
+    reasoning: true,
+    tools: true,
+    adaptiveThinking: true,
+    cost: {
+      input: 5.0,
+      output: 25.0,
+      cacheRead: 0.5,
+      cacheWrite: 6.25,
+    },
+    costRegional: {
+      input: 5.5,
+      output: 27.5,
+      cacheRead: 0.55,
+      cacheWrite: 6.875,
+    },
+    region: "global",
+  },
+  {
+    id: "claude-opus-5",
+    name: "Claude Opus 5",
+    apiId: "claude-opus-5",
+    publisher: "anthropic",
+    endpointType: "maas",
+    contextWindow: 1000000,
+    maxTokens: 128000,
+    input: ["text", "image"],
+    reasoning: true,
+    tools: true,
+    adaptiveThinking: true,
+    cost: {
+      input: 5.0,
+      output: 25.0,
+      cacheRead: 0.5,
+      cacheWrite: 6.25,
+    },
+    costRegional: {
+      input: 5.5,
+      output: 27.5,
+      cacheRead: 0.55,
+      cacheWrite: 6.875,
+    },
+    region: "global",
+  },
+  {
     id: "claude-sonnet-5",
     name: "Claude Sonnet 5",
     apiId: "claude-sonnet-5",
@@ -35,6 +87,58 @@ export const CLAUDE_MODELS: VertexModelConfig[] = [
       output: 11.0,
       cacheRead: 0.22,
       cacheWrite: 2.75,
+    },
+    region: "global",
+  },
+  {
+    id: "claude-fable-5-1",
+    name: "Claude Fable 5.1",
+    apiId: "claude-fable-5-1",
+    publisher: "anthropic",
+    endpointType: "maas",
+    contextWindow: 1000000,
+    maxTokens: 128000,
+    input: ["text", "image"],
+    reasoning: true,
+    tools: true,
+    adaptiveThinking: true,
+    cost: {
+      input: 10.0,
+      output: 50.0,
+      cacheRead: 0.25,
+      cacheWrite: 12.5,
+    },
+    costRegional: {
+      input: 11.0,
+      output: 55.0,
+      cacheRead: 0.275,
+      cacheWrite: 13.75,
+    },
+    region: "global",
+  },
+  {
+    id: "claude-fable-5",
+    name: "Claude Fable 5",
+    apiId: "claude-fable-5",
+    publisher: "anthropic",
+    endpointType: "maas",
+    contextWindow: 1000000,
+    maxTokens: 128000,
+    input: ["text", "image"],
+    reasoning: true,
+    tools: true,
+    adaptiveThinking: true,
+    cost: {
+      input: 10.0,
+      output: 50.0,
+      cacheRead: 1.0,
+      cacheWrite: 12.5,
+    },
+    costRegional: {
+      input: 11.0,
+      output: 55.0,
+      cacheRead: 1.1,
+      cacheWrite: 13.75,
     },
     region: "global",
   },
@@ -160,6 +264,7 @@ export const CLAUDE_MODELS: VertexModelConfig[] = [
     input: ["text", "image"],
     reasoning: true,
     tools: true,
+    adaptiveThinking: false,
     cost: {
       input: 5.0,
       output: 25.0,
@@ -185,6 +290,7 @@ export const CLAUDE_MODELS: VertexModelConfig[] = [
     input: ["text", "image"],
     reasoning: true,
     tools: true,
+    adaptiveThinking: false,
     cost: {
       input: 3.0,
       output: 15.0,
@@ -210,6 +316,7 @@ export const CLAUDE_MODELS: VertexModelConfig[] = [
     input: ["text", "image"],
     reasoning: true,
     tools: true,
+    adaptiveThinking: false,
     cost: {
       input: 1.0,
       output: 5.0,
@@ -237,6 +344,7 @@ export const CLAUDE_MODELS: VertexModelConfig[] = [
     input: ["text", "image"],
     reasoning: true,
     tools: true,
+    adaptiveThinking: false,
     cost: {
       input: 15.0,
       output: 75.0,
@@ -258,6 +366,7 @@ export const CLAUDE_MODELS: VertexModelConfig[] = [
     input: ["text", "image"],
     reasoning: true,
     tools: true,
+    adaptiveThinking: false,
     cost: {
       input: 15.0,
       output: 75.0,
@@ -277,6 +386,7 @@ export const CLAUDE_MODELS: VertexModelConfig[] = [
     input: ["text", "image"],
     reasoning: true,
     tools: true,
+    adaptiveThinking: false,
     cost: {
       input: 3.0,
       output: 15.0,
@@ -298,6 +408,7 @@ export const CLAUDE_MODELS: VertexModelConfig[] = [
     input: ["text", "image"],
     reasoning: false,
     tools: true,
+    adaptiveThinking: false,
     cost: {
       input: 3.0,
       output: 15.0,
@@ -307,3 +418,53 @@ export const CLAUDE_MODELS: VertexModelConfig[] = [
     region: "global",
   },
 ];
+
+/**
+ * Determine whether a model supports/requires Anthropic's adaptive thinking.
+ *
+ * - Returns `model.adaptiveThinking` if explicitly defined.
+ * - For Anthropic publisher: inspects model ID / apiId:
+ *   - Legacy extended thinking (<= 4.5): 4-5, 4-1, 4-0, 4, 3-7, 3-5 -> false
+ *   - Adaptive thinking (>= 4.6, 5+, fable, mythos) -> true
+ *   - Default for Anthropic models is true (modern standard).
+ * - For non-Anthropic models: returns false.
+ */
+export function isAdaptiveThinking(model: VertexModelConfig): boolean {
+  if (model.adaptiveThinking !== undefined) {
+    return model.adaptiveThinking;
+  }
+  if (model.publisher !== "anthropic") {
+    return false;
+  }
+  const id = (model.apiId || model.id).toLowerCase();
+  const baseId = id.split("@")[0];
+
+  // Check known legacy families: 3.x, 4.0, 4.1, 4.5
+  if (
+    baseId.includes("4-5") ||
+    baseId.includes("4.5") ||
+    baseId.includes("4-1") ||
+    baseId.includes("4.1") ||
+    baseId.endsWith("-4") ||
+    baseId.includes("-4-") ||
+    baseId.includes("3-5") ||
+    baseId.includes("3.5") ||
+    baseId.includes("3-7") ||
+    baseId.includes("3.7")
+  ) {
+    if (
+      !baseId.includes("4-6") &&
+      !baseId.includes("4.6") &&
+      !baseId.includes("4-7") &&
+      !baseId.includes("4.7") &&
+      !baseId.includes("4-8") &&
+      !baseId.includes("4.8") &&
+      !baseId.includes("-5") &&
+      !baseId.includes(".5")
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}

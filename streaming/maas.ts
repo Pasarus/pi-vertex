@@ -27,7 +27,9 @@ import {
 // so it works under pi, vitest and tsc alike.
 import { streamSimpleOpenAICompletions } from "@earendil-works/pi-ai/compat";
 import { buildBaseUrl, getAccessToken, getAuthConfig, resolveLocation } from "../auth.js";
+import { isAdaptiveThinking } from "../models/claude.js";
 import type { Context, StreamOptions, VertexModelConfig } from "../types.js";
+import { resolveContextTools, resolveSystemPrompt } from "../utils.js";
 
 function mapAnthropicEffort(reasoning?: string): "low" | "medium" | "high" | "max" | undefined {
   if (!reasoning) return undefined;
@@ -49,9 +51,92 @@ function sanitizeToolId(id: string): string {
 }
 
 function isValidThinkingSignature(signature?: string): boolean {
-  if (!signature) return false;
-  // Anthropic signatures are base64-like encrypted payloads.
-  return /^[A-Za-z0-9+/]+={0,2}$/.test(signature) && signature.length % 4 === 0;
+  if (!signature || typeof signature !== "string") return false;
+  const trimmed = signature.trim();
+  if (trimmed.length === 0) return false;
+  // Accept standard or URL-safe base64 / encrypted signatures
+  return /^[A-Za-z0-9+/_-]+={0,2}$/.test(trimmed);
+}
+
+const JSON_SCHEMA_META_DECLARATIONS = new Set([
+  "$schema",
+  "$id",
+  "$anchor",
+  "$dynamicAnchor",
+  "$vocabulary",
+  "$comment",
+  "$defs",
+  "definitions",
+]);
+
+/**
+ * Strip meta-declarations ($schema, etc.) from a JSON schema object recursively.
+ */
+function sanitizeJsonSchema(schema: unknown): unknown {
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+    return schema;
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (JSON_SCHEMA_META_DECLARATIONS.has(key)) continue;
+    result[key] = sanitizeJsonSchema(value);
+  }
+  return result;
+}
+
+/**
+ * Ensure tool parameters adhere to Anthropic's expected input_schema structure.
+ */
+function sanitizeAnthropicToolInputSchema(parameters: unknown): Record<string, unknown> {
+  const sanitized = sanitizeJsonSchema(parameters);
+  if (!sanitized || typeof sanitized !== "object" || Array.isArray(sanitized)) {
+    return { type: "object", properties: {} };
+  }
+  const obj = { ...(sanitized as Record<string, unknown>) };
+  if (obj.type !== "object") {
+    obj.type = "object";
+  }
+  if (!obj.properties || typeof obj.properties !== "object") {
+    obj.properties = {};
+  }
+  return obj;
+}
+
+/**
+ * Convert tool result content to Anthropic's expected format, preserving images.
+ */
+function convertAnthropicToolResultContent(content: any): any {
+  if (typeof content === "string") {
+    return content || "";
+  }
+  if (!Array.isArray(content)) {
+    return JSON.stringify(content ?? "");
+  }
+  const hasImages = content.some((c: any) => c?.type === "image");
+  if (!hasImages) {
+    const text = content
+      .filter((c: any) => c?.type === "text")
+      .map((c: any) => c.text)
+      .join("\n");
+    return text || "";
+  }
+  // Multimodal tool result with text and image blocks
+  const blocks: any[] = [];
+  for (const c of content) {
+    if (c?.type === "text") {
+      blocks.push({ type: "text", text: c.text });
+    } else if (c?.type === "image") {
+      blocks.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: c.mimeType,
+          data: c.data,
+        },
+      });
+    }
+  }
+  return blocks.length > 0 ? blocks : "";
 }
 
 /**
@@ -179,30 +264,56 @@ async function streamAnthropic(
 
     if (msg.role === "assistant") {
       const blocks: any[] = [];
-      const isSameModel =
-        msg.provider === "vertex" && msg.api === "anthropic-messages" && msg.model === model.id;
 
       if (Array.isArray(msg.content)) {
         for (const block of msg.content) {
           if (block.type === "text" && block.text?.trim()) {
             blocks.push({ type: "text", text: block.text });
           } else if (block.type === "toolCall") {
+            let input = block.arguments;
+            if (typeof input === "string") {
+              try {
+                input = JSON.parse(input);
+              } catch {
+                input = {};
+              }
+            }
+            if (!input || typeof input !== "object" || Array.isArray(input)) {
+              input = {};
+            }
             blocks.push({
               type: "tool_use",
               id: sanitizeToolId(String(block.id ?? "")),
               name: block.name,
-              input: block.arguments ?? {},
+              input,
             });
-          } else if (block.type === "thinking" && block.thinking?.trim()) {
-            if (isSameModel && isValidThinkingSignature(block.thinkingSignature)) {
-              blocks.push({
-                type: "thinking",
-                thinking: block.thinking,
-                signature: block.thinkingSignature,
-              });
+          } else if (block.type === "thinking") {
+            if (block.redacted) {
+              if (block.thinkingSignature) {
+                blocks.push({
+                  type: "redacted_thinking",
+                  data: block.thinkingSignature,
+                });
+              }
             } else {
-              // Cross-model/provider replay: convert thinking to plain text to avoid signature errors.
-              blocks.push({ type: "text", text: block.thinking });
+              const hasSignature = isValidThinkingSignature(block.thinkingSignature);
+              const hasThinking =
+                typeof block.thinking === "string" && block.thinking.trim().length > 0;
+
+              if (hasThinking || hasSignature) {
+                if (hasSignature) {
+                  // Keep thinking block intact (even with empty thinking text) so Anthropic
+                  // verifies turn history correctly on tool replays.
+                  blocks.push({
+                    type: "thinking",
+                    thinking: block.thinking || "",
+                    signature: block.thinkingSignature,
+                  });
+                } else {
+                  // No valid signature: replay as text to prevent Anthropic signature error
+                  blocks.push({ type: "text", text: block.thinking });
+                }
+              }
             }
           }
         }
@@ -217,20 +328,10 @@ async function streamAnthropic(
       let j = i;
       while (j < replayable.length && replayable[j]?.role === "toolResult") {
         const tr = replayable[j];
-        const text =
-          typeof tr.content === "string"
-            ? tr.content
-            : Array.isArray(tr.content)
-              ? tr.content
-                  .filter((c: any) => c?.type === "text")
-                  .map((c: any) => c.text)
-                  .join("\n")
-              : JSON.stringify(tr.content ?? "");
-
         toolResultBlocks.push({
           type: "tool_result",
           tool_use_id: sanitizeToolId(String(tr.toolCallId ?? "")),
-          content: text || "",
+          content: convertAnthropicToolResultContent(tr.content),
           ...(tr.isError ? { is_error: true } : {}),
         });
         j++;
@@ -243,22 +344,24 @@ async function streamAnthropic(
     }
   }
 
+  const systemPrompt = resolveSystemPrompt(context);
+  const effectiveTools = resolveContextTools(context);
+
   // Build tools
-  const tools = context.tools?.map((t: any) => ({
-    name: t.name,
-    description: t.description,
-    input_schema: {
-      type: "object" as const,
-      properties: t.parameters?.properties ?? {},
-      required: t.parameters?.required ?? [],
-    },
-  }));
+  const tools =
+    model.tools && effectiveTools.length > 0
+      ? effectiveTools.map((t: any) => ({
+          name: t.name,
+          description: t.description,
+          input_schema: sanitizeAnthropicToolInputSchema(t.parameters),
+        }))
+      : undefined;
 
   const params: any = {
     model: model.apiId,
     max_tokens: options?.maxTokens || model.maxTokens,
     messages,
-    ...(context.systemPrompt ? { system: context.systemPrompt } : {}),
+    ...(systemPrompt ? { system: systemPrompt } : {}),
     ...(tools && tools.length > 0 ? { tools } : {}),
     ...(options?.temperature !== undefined && !options?.reasoning
       ? { temperature: options.temperature }
@@ -267,11 +370,13 @@ async function streamAnthropic(
 
   // Thinking — adaptive (4.6+) vs legacy (4.5 and below)
   if (model.reasoning && options?.reasoning) {
-    if (model.adaptiveThinking) {
-      // Claude 4.6+: adaptive thinking with effort parameter
+    if (isAdaptiveThinking(model)) {
+      // Claude 4.6+: adaptive thinking with effort parameter.
+      // Explicitly set display: "summarized" so Claude 4.7+, 4.8, 5 return
+      // thinking text rather than omitting it (which is their default).
       const effort = mapAnthropicEffort(options.reasoning);
       if (effort) {
-        params.thinking = { type: "adaptive" };
+        params.thinking = { type: "adaptive", display: "summarized" };
         params.output_config = { effort };
       }
     } else {
@@ -284,7 +389,7 @@ async function streamAnthropic(
         xhigh: 16384,
       };
       const budget = budgetMap[options.reasoning] ?? 8192;
-      params.thinking = { type: "enabled", budget_tokens: budget };
+      params.thinking = { type: "enabled", budget_tokens: budget, display: "summarized" };
       // max_tokens must be > budget_tokens for legacy thinking
       if (params.max_tokens <= budget) {
         params.max_tokens = budget + 1024;
@@ -489,7 +594,15 @@ export function streamMaaS(
         },
       };
 
-      const innerStream = streamSimpleOpenAICompletions(modelForPi, context as any, {
+      const effectiveTools = resolveContextTools(context);
+      const systemPrompt = resolveSystemPrompt(context);
+      const contextForPi = {
+        ...context,
+        tools: effectiveTools,
+        ...(systemPrompt ? { systemPrompt } : {}),
+      };
+
+      const innerStream = streamSimpleOpenAICompletions(modelForPi, contextForPi as any, {
         ...options,
         apiKey: accessToken,
         maxTokens: options?.maxTokens || model.maxTokens,

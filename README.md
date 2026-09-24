@@ -1,18 +1,18 @@
 # pi-vertex
 
-[![npm version](https://img.shields.io/npm/v/@cebarks/pi-vertex)](https://www.npmjs.com/package/@cebarks/pi-vertex)
-[![CI](https://github.com/cebarks/pi-vertex/actions/workflows/ci.yml/badge.svg)](https://github.com/cebarks/pi-vertex/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/@pasarus/pi-vertex)](https://www.npmjs.com/package/@pasarus/pi-vertex)
+[![CI](https://github.com/Pasarus/pi-vertex/actions/workflows/ci.yml/badge.svg)](https://github.com/Pasarus/pi-vertex/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A Google Vertex AI provider for the [Pi Coding Agent](https://pi.dev) — Gemini, Claude, Llama, DeepSeek, Qwen, Mistral and the rest of the Vertex Model Garden behind a single provider, billed through your GCP project, with **dynamic model discovery** so models that are enabled in *your* project show up in the selector without a code change or a release.
 
 ```bash
-pi install npm:@cebarks/pi-vertex
+pi install npm:@pasarus/pi-vertex
 export GOOGLE_CLOUD_PROJECT=your-project-id
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json   # or: gcloud auth application-default login
 ```
 
-![pi-vertex model selector](https://raw.githubusercontent.com/cebarks/pi-vertex/main/screenshot.png)
+![pi-vertex model selector](https://raw.githubusercontent.com/Pasarus/pi-vertex/main/screenshot.png)
 
 ## About this fork
 
@@ -20,31 +20,37 @@ Lineage:
 
 1. [`ssweens/pi-packages`](https://github.com/ssweens/pi-packages) — original `@ssweens/pi-vertex`, published inside a mono-repo
 2. [`lhl/pi-vertex`](https://github.com/lhl/pi-vertex) — `git filter-repo` extraction into a standalone repo with tests, lint and CI (`@lhl/pi-vertex`, v1.1.5 → v1.1.9)
-3. **this repo** — [`cebarks/pi-vertex`](https://github.com/cebarks/pi-vertex) (`@cebarks/pi-vertex`, v2.x)
+3. [`cebarks/pi-vertex`](https://github.com/cebarks/pi-vertex) — added dynamic model discovery via Model Garden API (`@cebarks/pi-vertex`, v2.0 → v2.1.2)
+4. **this repo** — [`Pasarus/pi-vertex`](https://github.com/Pasarus/pi-vertex) (`@pasarus/pi-vertex`, v2.1.3+)
 
-The reason for the second fork is discovery. Up to v1.1.9 the model list was a hand-maintained static table: every new Vertex model required an upstream code change, a release, and a pi-package update on your side — and enabling a model your project has access to was invisible until someone shipped it. This fork queries the Model Garden API at startup, probes each model for project-level access, and registers what actually answers. Static metadata is still used where it exists, so pricing and capability limits for known models stay authoritative rather than guessed.
-
-### What this fork adds (v2.x, on top of v1.1.9)
+### What this fork adds (v2.1.3)
 
 | Change | Details |
+| -------- | --------- |
+| **Adaptive thinking fixes** | Fully supports Claude 4.6+, 4.7+, 4.8, 5+ adaptive thinking using `{ type: "adaptive", display: "summarized" }` and `output_config: { effort }`. Eliminates the `thinking.type.enabled is not supported for this model` 400 error. Restores visible thinking text via `display: "summarized"`. |
+| **Tool-use thinking block preservation** | Preserves thinking blocks with thought signatures across multi-turn tool replay even when thinking text is empty, preventing Anthropic 400 `thinking blocks cannot be modified` errors. |
+| **Gemini 3 tool call IDs** | Correlates tool calls and responses using `id` on `functionCall` and `functionResponse` for Gemini 3+ models (`requiresToolCallId`). |
+| **Tool schema sanitization** | Strips `$schema`, `$id`, and other meta-declarations from tool definitions, preventing 400 invalid schema errors on both Anthropic and Gemini endpoints. |
+| **Multimodal tool results** | Replays images inside tool results for Claude and Gemini, enabling vision tool workflows. |
+| **Redacted thinking support** | Properly maps `redacted_thinking` blocks back to Anthropic. |
+
+### Dynamic model discovery (v2.x)
+
+The extension queries the Model Garden API at startup, probes each model for project-level access, and registers what actually answers:
+
+| Feature | Details |
 | -------- | --------- |
 | **Dynamic model discovery** | `discovery.ts` lists `publishers/{p}/models` (`v1beta1`) for 11 publishers, filters non-chat models (TTS, embeddings, Imagen), and registers the survivors — new models appear with no code change |
 | **Probe-based availability** | Each candidate is checked with a `countTokens` request against *your* project. `200` → available; `400 "…infeasible"` → available (Claude/MaaS don't implement `countTokens`); `404`/org-policy/not-servable → skipped. No more offering models your project can't reach |
 | **Disk cache + `/vertex-refresh`** | Results cached to `~/.pi/agent/cache/pi-vertex-models.json` (default TTL 24 h) so startup stays fast; `/vertex-refresh` clears the cache and re-probes in-session |
 | **Discovery configuration** | `discoveryEnabled`, `discoveryCacheTtlMs`, `discoveryPublishers` in the settings file; falls back to the full static table if discovery is off or fails |
 | **New models** | `claude-opus-4-8`, `claude-sonnet-5` |
-| **pi package scope migration** | Moved to `@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` and cleared the `npm audit` findings that came with the old dependency set |
-| **Bug fixes** | `baseUrl: undefined` so pi's provider-level fallback wins (empty string used to short-circuit `??`); `streamSimpleOpenAICompletions` imported via the compat root entrypoint (pi's jiti module map exposes root entrypoints only); Gemini `maxTokens` 65,536 → 65,535 (Vertex treats the bound as exclusive); legacy `thinking` config for Claude 4.5 and below, adaptive thinking for 4.6+ |
-
-### Carried over from the previous fork
-
-Standalone repo; 93 unit tests (auth, config, utils, model integrity, `convertToGeminiMessages`, streaming dispatch, mocked Gemini + MaaS streams); Biome lint/format; GitHub Actions workflow for type-check, lint, coverage; real `build`/`check`/`test` scripts; Anthropic stream lifecycle fixed to `end()` exactly once; hardcoded `maxTokens / 2` halving removed; regional Claude pricing (`costRegional`) applied when the resolved endpoint isn't global; Gemini cache-token accounting, image tool-result replay, missing-tool-result synthesis, and safety/blocked finish handling.
+| **pi package scope migration** | Moved to `@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` |
 
 ### Provenance
 
-- **Upstream**: [`lhl/pi-vertex`](https://github.com/lhl/pi-vertex) → [`ssweens/pi-packages`](https://github.com/ssweens/pi-packages) (path `pi-vertex/`, filtered with `git filter-repo --path pi-vertex/ --path-rename pi-vertex/:`, so upstream history is intact)
-- **Fork point**: v1.1.9 (`f7b1a46`), rebranded in `d5ca3b3` (2026-08-25)
-- **npm**: [`@cebarks/pi-vertex`](https://www.npmjs.com/package/@cebarks/pi-vertex) · **repo**: [`cebarks/pi-vertex`](https://github.com/cebarks/pi-vertex)
+- **Fork point**: `@cebarks/pi-vertex` v2.1.2
+- **npm**: [`@pasarus/pi-vertex`](https://www.npmjs.com/package/@pasarus/pi-vertex) · **repo**: [`Pasarus/pi-vertex`](https://github.com/Pasarus/pi-vertex)
 - **Requirements**: pi ≥ 0.74 (the `@earendil-works/*` scope); developed against 0.84.x
 
 ## Model discovery
@@ -78,10 +84,10 @@ Because defaults include placeholder pricing, costs shown in pi for an unknown m
 
 ## Features
 
-- **45 statically described models** across Gemini (9), Claude (12), Llama (3) and other MaaS (21) — plus whatever else discovery finds in your project
+- **49 statically described models** across Gemini (9), Claude (16), Llama (3) and other MaaS (21) — plus whatever else discovery finds in your project
 - **Unified streaming** through one provider: Gemini via `@google/genai`, Claude via the native `@anthropic-ai/vertex-sdk`, everything else via Vertex's OpenAI-compatible endpoint
-- **Full tool calling** with multi-turn tool use and tool-result handling on every path
-- **Thinking / reasoning**: Gemini 3 thinking levels, Gemini 2.5 thinking budgets, thought-signature preservation, Claude adaptive and legacy thinking formats
+- **Full tool calling** with dual-format transcript extraction (`resolveContextTools` & `resolveSystemPrompt`), multimodal image results, and Gemini 3 tool call IDs
+- **Thinking / reasoning**: Gemini 3 thinking levels, Gemini 2.5 thinking budgets, thought-signature preservation, Claude adaptive (`display: "summarized"`) and legacy thinking formats
 - **Automatic auth** via Application Default Credentials or a service-account key
 - **Region awareness**: global endpoints by default, regional when required, with regional Claude pricing applied automatically
 - **Cost tracking** for all statically known models, including cache reads/writes and thinking tokens
@@ -90,13 +96,13 @@ Because defaults include placeholder pricing, costs shown in pi for an unknown m
 
 ```bash
 # Via pi (recommended)
-pi install npm:@cebarks/pi-vertex
+pi install npm:@pasarus/pi-vertex
 
 # Or via npm
-npm install -g @cebarks/pi-vertex
+npm install -g @pasarus/pi-vertex
 
 # Or from source
-git clone https://github.com/cebarks/pi-vertex.git
+git clone https://github.com/Pasarus/pi-vertex.git
 cd pi-vertex && npm install
 pi install /path/to/pi-vertex
 ```
@@ -197,10 +203,14 @@ Non-global regions use `costRegional` where Google publishes a regional premium.
 
 | Model | Context | Max output | Reasoning | Global (in/out) | Regional (in/out) |
 | --- | --- | --- | --- | --- | --- |
+| `claude-opus-5-5` | 1M | 128,000 | yes | $5.00/$25.00 | $5.50/$27.50 |
+| `claude-opus-5` | 1M | 128,000 | yes | $5.00/$25.00 | $5.50/$27.50 |
+| `claude-sonnet-5` | 1M | 128,000 | yes | $2.00/$10.00 | $2.20/$11.00 |
+| `claude-fable-5-1` | 1M | 128,000 | yes | $10.00/$50.00 | $11.00/$55.00 |
+| `claude-fable-5` | 1M | 128,000 | yes | $10.00/$50.00 | $11.00/$55.00 |
 | `claude-opus-4-8` | 1M | 128,000 | yes | $5.00/$25.00 | $5.50/$27.50 |
 | `claude-opus-4-7` | 1M | 128,000 | yes | $5.00/$25.00 | $5.50/$27.50 |
 | `claude-opus-4-6` | 1M | 128,000 | yes | $5.00/$25.00 | $5.50/$27.50 |
-| `claude-sonnet-5` | 1M | 128,000 | yes | $2.00/$10.00 | $2.20/$11.00 |
 | `claude-sonnet-4-6` | 1M | 128,000 | yes | $3.00/$15.00 | $3.30/$16.50 |
 | `claude-opus-4-5` | 200K | 32,000 | yes | $5.00/$25.00 | $5.50/$27.50 |
 | `claude-sonnet-4-5` | 200K | 64,000 | yes | $3.00/$15.00 | $3.30/$16.50 |
@@ -251,6 +261,10 @@ Non-global regions use `costRegional` where Google publishes a regional premium.
 Every static model defaults to `region: "global"`, which resolves to `https://aiplatform.googleapis.com/v1/projects/{project}/locations/global/...`. A regional endpoint looks like `https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/...`.
 
 `GOOGLE_CLOUD_LOCATION` (or `googleCloudLocation`) is a **global override** applied on top of each model's own region — setting it forces every request through that region, including for models that only serve from `global`. Use it when you have a data-residency requirement and have confirmed the models you rely on are servable there; it also switches Claude pricing to `costRegional` when a premium is defined.
+
+## Developer and Agent Guide
+
+See [`AGENTS.md`](AGENTS.md) for detailed architecture documentation, model dispatch invariants, transcript tool extraction details, and contribution instructions.
 
 ## Architecture
 

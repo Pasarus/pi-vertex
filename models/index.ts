@@ -9,7 +9,7 @@
 import type { DiscoveryOptions } from "../discovery.js";
 import { buildModelConfigs, discoverAvailableModels } from "../discovery.js";
 import type { VertexModelConfig } from "../types.js";
-import { CLAUDE_MODELS } from "./claude.js";
+import { CLAUDE_MODELS, isAdaptiveThinking } from "./claude.js";
 import { GEMINI_MODELS } from "./gemini.js";
 import { MAAS_MODELS } from "./maas.js";
 
@@ -38,12 +38,37 @@ export async function getAllModels(
   return { models, fromCache, count: models.length };
 }
 
+const MODEL_ALIASES: Record<string, string> = {
+  "gemini-flash": "gemini-3.5-flash",
+  "gemini-pro": "gemini-2.5-pro",
+  "opus-5.5": "claude-opus-5-5",
+  "claude-opus-5.5": "claude-opus-5-5",
+  "opus-5": "claude-opus-5",
+  "sonnet-5": "claude-sonnet-5",
+  "opus-4.8": "claude-opus-4-8",
+  "opus-4.7": "claude-opus-4-7",
+  "opus-4.6": "claude-opus-4-6",
+  "sonnet-4.6": "claude-sonnet-4-6",
+  "sonnet-4.5": "claude-sonnet-4-5",
+};
+
 export function getModelById(id: string): VertexModelConfig | undefined {
-  return STATIC_MODELS.find((m) => m.id === id);
+  const resolvedId = MODEL_ALIASES[id] ?? id;
+  const baseId = resolvedId.split("@")[0];
+  const normalizedBaseId = baseId.replace(/\./g, "-");
+  return STATIC_MODELS.find(
+    (m) =>
+      m.id === id ||
+      m.id === resolvedId ||
+      m.id === baseId ||
+      m.id === normalizedBaseId ||
+      m.apiId === id ||
+      m.apiId === resolvedId,
+  );
 }
 
 export function getModelsByEndpointType(type: "gemini" | "maas"): VertexModelConfig[] {
   return STATIC_MODELS.filter((m) => m.endpointType === type);
 }
 
-export { GEMINI_MODELS, CLAUDE_MODELS, MAAS_MODELS };
+export { GEMINI_MODELS, CLAUDE_MODELS, MAAS_MODELS, isAdaptiveThinking };

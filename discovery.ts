@@ -19,6 +19,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { getAccessToken, resolveProjectId } from "./auth.js";
+import { isAdaptiveThinking } from "./models/claude.js";
 import type { EndpointType, ModelCost, ModelInputType, VertexModelConfig } from "./types.js";
 
 // --- Types ---
@@ -97,6 +98,7 @@ const PUBLISHER_DEFAULTS: Record<string, PublisherDefaults> = {
     input: ["text", "image"],
     reasoning: true,
     tools: true,
+    adaptiveThinking: true,
     cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
     probeRegion: "us-east5",
   },
@@ -431,19 +433,21 @@ export function buildModelConfigs(
   const configs: VertexModelConfig[] = [];
 
   for (const am of available) {
-    const staticConfig = staticById.get(am.modelId);
+    const rawId = am.modelId;
+    const baseId = rawId.split("@")[0];
+    const staticConfig = staticById.get(rawId) ?? staticById.get(baseId);
     if (staticConfig) {
       // Use authoritative static metadata
       configs.push(staticConfig);
     } else {
       // Generate from publisher defaults
       const defaults = PUBLISHER_DEFAULTS[am.publisher] ?? PUBLISHER_DEFAULTS._default;
-      const name = am.modelId
+      const name = baseId
         .split("-")
         .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
         .join(" ");
 
-      configs.push({
+      const dynamicConfig: VertexModelConfig = {
         id: am.modelId,
         name,
         apiId:
@@ -462,7 +466,11 @@ export function buildModelConfigs(
         adaptiveThinking: defaults.adaptiveThinking,
         cost: { ...defaults.cost },
         region: "global",
-      });
+      };
+      if (am.publisher === "anthropic") {
+        dynamicConfig.adaptiveThinking = isAdaptiveThinking(dynamicConfig);
+      }
+      configs.push(dynamicConfig);
     }
   }
 

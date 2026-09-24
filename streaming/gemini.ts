@@ -19,6 +19,8 @@ import {
   calculateCost,
   convertToGeminiMessages,
   convertToolsForGemini,
+  resolveContextTools,
+  resolveSystemPrompt,
   retainThoughtSignature,
   sanitizeText,
 } from "../utils.js";
@@ -113,14 +115,16 @@ export function streamGemini(
         ...(options?.temperature !== undefined && { temperature: options.temperature }),
       };
 
-      // Add system prompt if present
-      if (context.systemPrompt) {
-        config.systemInstruction = sanitizeText(context.systemPrompt);
+      // Add system prompt if present (from context.systemPrompt or transcript system messages)
+      const systemInstruction = resolveSystemPrompt(context);
+      if (systemInstruction) {
+        config.systemInstruction = sanitizeText(systemInstruction);
       }
 
-      // Add tools if present (using parametersJsonSchema for full JSON Schema support)
-      if (context.tools && context.tools.length > 0) {
-        config.tools = convertToolsForGemini(context.tools);
+      // Add tools if present (resolving from context.tools or transcript system messages)
+      const effectiveTools = resolveContextTools(context);
+      if (model.tools && effectiveTools.length > 0) {
+        config.tools = convertToolsForGemini(effectiveTools);
       }
 
       // Add thinking configuration (matches pi-mono's buildParams logic)

@@ -7,6 +7,7 @@
 
 import type {
   AssistantMessage,
+  Context,
   ImageContent,
   Message,
   TextContent,
@@ -68,6 +69,111 @@ function supportsMultimodalFunctionResponse(modelId: string): boolean {
 }
 
 /**
+ * Check if the model requires explicit tool call IDs in function calls/responses.
+ * Gemini 3+, Claude, and GPT-OSS models require functionCall.id and functionResponse.id.
+ */
+export function requiresToolCallId(modelId: string): boolean {
+  const geminiMajorVersion = getGeminiMajorVersion(modelId);
+  return (
+    modelId.startsWith("claude-") ||
+    modelId.startsWith("gpt-oss-") ||
+    (geminiMajorVersion !== undefined && geminiMajorVersion >= 3)
+  );
+}
+
+const JSON_SCHEMA_META_DECLARATIONS = new Set([
+  "$schema",
+  "$id",
+  "$anchor",
+  "$dynamicAnchor",
+  "$vocabulary",
+  "$comment",
+  "$defs",
+  "definitions",
+]);
+
+/**
+ * Strip JSON schema meta-declarations ($schema, $id, etc.) that cause 400 errors
+ * on Vertex Gemini and Claude endpoints.
+ */
+export function sanitizeJsonSchema(schema: unknown): unknown {
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+    return schema;
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (JSON_SCHEMA_META_DECLARATIONS.has(key)) continue;
+    result[key] = sanitizeJsonSchema(value);
+  }
+  return result;
+}
+
+type TranscriptSystemMessage = {
+  role: "system";
+  content?: string | Array<{ type: string; text?: string }>;
+  sections?: Record<string, string | null>;
+  toolsAdded?: Tool[];
+  toolsRemoved?: Array<{ name: string }>;
+};
+
+/**
+ * Extract active tools from Context.
+ * Pi coding agent passes tools either directly in `context.tools` OR encoded
+ * into transcript messages via system message delta fields (`toolsAdded`/`toolsRemoved`).
+ */
+export function resolveContextTools(context: Context): Tool[] {
+  if (context.tools && context.tools.length > 0) {
+    return context.tools;
+  }
+  const tools = new Map<string, Tool>();
+  for (const message of context.messages ?? []) {
+    if ((message as { role?: string }).role === "system") {
+      const sysMsg = message as unknown as TranscriptSystemMessage;
+      for (const tool of sysMsg.toolsRemoved ?? []) {
+        tools.delete(tool.name);
+      }
+      for (const tool of sysMsg.toolsAdded ?? []) {
+        tools.set(tool.name, tool);
+      }
+    }
+  }
+  return [...tools.values()];
+}
+
+/**
+ * Extract the system prompt from Context.
+ * Resolves either `context.systemPrompt` or text from system messages in `context.messages`.
+ */
+export function resolveSystemPrompt(context: Context): string | undefined {
+  if (context.systemPrompt && context.systemPrompt.trim().length > 0) {
+    return context.systemPrompt;
+  }
+  const parts: string[] = [];
+  for (const message of context.messages ?? []) {
+    if ((message as { role?: string }).role === "system") {
+      const sysMsg = message as unknown as TranscriptSystemMessage;
+      if (typeof sysMsg.content === "string" && sysMsg.content.trim().length > 0) {
+        parts.push(sysMsg.content.trim());
+      } else if (Array.isArray(sysMsg.content)) {
+        for (const block of sysMsg.content) {
+          if (block.type === "text" && block.text?.trim()) {
+            parts.push(block.text.trim());
+          }
+        }
+      }
+      if (sysMsg.sections && typeof sysMsg.sections === "object") {
+        for (const text of Object.values(sysMsg.sections)) {
+          if (typeof text === "string" && text.trim().length > 0) {
+            parts.push(text.trim());
+          }
+        }
+      }
+    }
+  }
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
+}
+
+/**
  * A single content turn in the Vertex Gemini request format.
  * The SDK doesn't export this shape directly, so we model it loosely — fields
  * are constructed inline below and validated server-side.
@@ -112,11 +218,13 @@ export function convertToGeminiMessages(messages: Message[], modelId: string): G
       },
     }));
 
+    const includeId = requiresToolCallId(modelId);
     const functionResponsePart: Record<string, unknown> = {
       functionResponse: {
         name: toolName,
         response: isError ? { error: responseValue } : { output: responseValue },
         ...(hasImages && supportsMultimodalFunctionResponse(modelId) ? { parts: imageParts } : {}),
+        ...(includeId && toolCallId ? { id: toolCallId } : {}),
       },
     };
 
@@ -234,10 +342,12 @@ export function convertToGeminiMessages(messages: Message[], modelId: string): G
             toolCallBlock.thoughtSignature,
           );
 
+          const includeId = requiresToolCallId(modelId);
           const part: Record<string, unknown> = {
             functionCall: {
               name: toolCallBlock.name,
               args: toolCallBlock.arguments ?? {},
+              ...(includeId && toolCallBlock.id ? { id: toolCallBlock.id } : {}),
             },
           };
           if (thoughtSig) {
@@ -290,7 +400,7 @@ export function convertToolsForGemini(
       functionDeclarations: tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
-        parametersJsonSchema: tool.parameters,
+        parametersJsonSchema: sanitizeJsonSchema(tool.parameters),
       })),
     },
   ];
@@ -305,7 +415,7 @@ export function convertTools(tools: Tool[]): Array<Record<string, unknown>> {
     function: {
       name: tool.name,
       description: tool.description,
-      parameters: tool.parameters,
+      parameters: sanitizeJsonSchema(tool.parameters),
     },
   }));
 }

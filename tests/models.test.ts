@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { STATIC_MODELS, getModelById, getModelsByEndpointType } from "../models/index.js";
+import {
+  STATIC_MODELS,
+  getModelById,
+  getModelsByEndpointType,
+  isAdaptiveThinking,
+} from "../models/index.js";
 
 describe("static models", () => {
   it("has at least 45 models registered", () => {
@@ -28,6 +33,12 @@ describe("static models", () => {
 
   it("getModelById returns model when found", () => {
     const model = getModelById("claude-opus-4-7");
+    expect(model).toBeDefined();
+    expect(model?.name).toBe("Claude Opus 4.7");
+  });
+
+  it("getModelById matches versioned model IDs by stripping @version", () => {
+    const model = getModelById("claude-opus-4-7@20260115");
     expect(model).toBeDefined();
     expect(model?.name).toBe("Claude Opus 4.7");
   });
@@ -121,5 +132,23 @@ describe("static models", () => {
       input: ["text", "image"],
       tools: false,
     });
+  });
+
+  it("correctly identifies adaptive thinking models via isAdaptiveThinking", () => {
+    const opus47 = getModelById("claude-opus-4-7");
+    if (!opus47) throw new Error("Expected claude-opus-4-7");
+    expect(isAdaptiveThinking(opus47)).toBe(true);
+
+    const sonnet46 = getModelById("claude-sonnet-4-6");
+    if (!sonnet46) throw new Error("Expected claude-sonnet-4-6");
+    expect(isAdaptiveThinking(sonnet46)).toBe(true);
+
+    const sonnet45 = getModelById("claude-sonnet-4-5");
+    if (!sonnet45) throw new Error("Expected claude-sonnet-4-5");
+    expect(isAdaptiveThinking(sonnet45)).toBe(false);
+
+    const gemini = getModelById("gemini-2.5-pro");
+    if (!gemini) throw new Error("Expected gemini-2.5-pro");
+    expect(isAdaptiveThinking(gemini)).toBe(false);
   });
 });

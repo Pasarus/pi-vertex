@@ -1,7 +1,7 @@
 /**
- * @cebarks/pi-vertex - Google Vertex AI provider for Pi coding agent
+ * @pasarus/pi-vertex - Google Vertex AI provider for Pi coding agent
  *
- * Fork of @lhl/pi-vertex with dynamic model discovery.
+ * Fork of @cebarks/pi-vertex with adaptive thinking fixes and hardened tool calling.
  *
  * Supports:
  * - Gemini models (via @google/genai)

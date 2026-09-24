@@ -252,6 +252,216 @@ describe("streamMaaS — Anthropic path", () => {
     const toolCall = done.message.content.find((b: any) => b.type === "toolCall");
     expect(toolCall).toMatchObject({ name: "read", arguments: { path: "/tmp" } });
   });
+
+  it("configures adaptive thinking with display: summarized for Claude 4.6+ models", async () => {
+    mocks.anthropicStream.mockReturnValue(
+      asyncIter([
+        {
+          type: "message_start",
+          message: { id: "msg_a", usage: { input_tokens: 1 } },
+        },
+        { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } },
+      ]),
+    );
+
+    const model = makeAnthropicModel({
+      id: "claude-opus-4-7",
+      apiId: "claude-opus-4-7",
+      adaptiveThinking: true,
+    });
+    await collectEvents(streamMaaS(model, baseContext, { reasoning: "high" }));
+
+    expect(mocks.anthropicStream).toHaveBeenCalledOnce();
+    const passedParams = mocks.anthropicStream.mock.calls[0][0];
+    expect(passedParams.thinking).toEqual({ type: "adaptive", display: "summarized" });
+    expect(passedParams.output_config).toEqual({ effort: "high" });
+  });
+
+  it("configures legacy thinking with budget_tokens and display: summarized for Claude 4.5", async () => {
+    mocks.anthropicStream.mockReturnValue(
+      asyncIter([
+        {
+          type: "message_start",
+          message: { id: "msg_l", usage: { input_tokens: 1 } },
+        },
+        { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } },
+      ]),
+    );
+
+    const model = makeAnthropicModel({
+      id: "claude-sonnet-4-5",
+      apiId: "claude-sonnet-4-5@20250929",
+      adaptiveThinking: false,
+    });
+    await collectEvents(streamMaaS(model, baseContext, { reasoning: "medium" }));
+
+    expect(mocks.anthropicStream).toHaveBeenCalledOnce();
+    const passedParams = mocks.anthropicStream.mock.calls[0][0];
+    expect(passedParams.thinking).toEqual({
+      type: "enabled",
+      budget_tokens: 4096,
+      display: "summarized",
+    });
+    expect(passedParams.output_config).toBeUndefined();
+  });
+
+  it("preserves empty-text thinking blocks with signatures during tool-call replay", async () => {
+    mocks.anthropicStream.mockReturnValue(
+      asyncIter([
+        {
+          type: "message_start",
+          message: { id: "msg_r", usage: { input_tokens: 1 } },
+        },
+        { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } },
+      ]),
+    );
+
+    const contextWithReplay: Context = {
+      messages: [
+        { role: "user", content: "read file", timestamp: Date.now() },
+        {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "", thinkingSignature: "validSig123" },
+            { type: "toolCall", id: "tc_1", name: "read", arguments: { path: "/test" } },
+          ],
+        } as any,
+        {
+          role: "toolResult",
+          toolCallId: "tc_1",
+          toolName: "read",
+          content: [{ type: "text", text: "file content" }],
+        } as any,
+      ],
+    };
+
+    const model = makeAnthropicModel({ id: "claude-opus-4-7", apiId: "claude-opus-4-7" });
+    await collectEvents(streamMaaS(model, contextWithReplay));
+
+    expect(mocks.anthropicStream).toHaveBeenCalledOnce();
+    const passedMessages = mocks.anthropicStream.mock.calls[0][0].messages;
+
+    const assistantMsg = passedMessages.find((m: any) => m.role === "assistant");
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg.content).toEqual([
+      { type: "thinking", thinking: "", signature: "validSig123" },
+      { type: "tool_use", id: "tc_1", name: "read", input: { path: "/test" } },
+    ]);
+  });
+
+  it("parses stringified arguments and preserves multimodal images in tool results", async () => {
+    mocks.anthropicStream.mockReturnValue(
+      asyncIter([
+        {
+          type: "message_start",
+          message: { id: "msg_mm", usage: { input_tokens: 1 } },
+        },
+        { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } },
+      ]),
+    );
+
+    const contextWithImage: Context = {
+      messages: [
+        { role: "user", content: "take screenshot", timestamp: Date.now() },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "tc_2",
+              name: "screenshot",
+              arguments: '{"fullPage":true}' as any,
+            },
+          ],
+        } as any,
+        {
+          role: "toolResult",
+          toolCallId: "tc_2",
+          toolName: "screenshot",
+          content: [
+            { type: "text", text: "captured" },
+            { type: "image", mimeType: "image/png", data: "base64png" },
+          ],
+        } as any,
+      ],
+    };
+
+    const model = makeAnthropicModel({ id: "claude-opus-4-7", apiId: "claude-opus-4-7" });
+    await collectEvents(streamMaaS(model, contextWithImage));
+
+    expect(mocks.anthropicStream).toHaveBeenCalledOnce();
+    const passedMessages = mocks.anthropicStream.mock.calls[0][0].messages;
+
+    const assistantMsg = passedMessages.find((m: any) => m.role === "assistant");
+    expect(assistantMsg.content[0]).toEqual({
+      type: "tool_use",
+      id: "tc_2",
+      name: "screenshot",
+      input: { fullPage: true },
+    });
+
+    const userToolResult = passedMessages.find(
+      (m: any) => m.role === "user" && m.content[0]?.type === "tool_result",
+    );
+    expect(userToolResult).toBeDefined();
+    expect(userToolResult.content[0]).toEqual({
+      type: "tool_result",
+      tool_use_id: "tc_2",
+      content: [
+        { type: "text", text: "captured" },
+        {
+          type: "image",
+          source: { type: "base64", media_type: "image/png", data: "base64png" },
+        },
+      ],
+    });
+  });
+
+  it("sanitizes tool schema meta-declarations like $schema for Anthropic", async () => {
+    mocks.anthropicStream.mockReturnValue(
+      asyncIter([
+        {
+          type: "message_start",
+          message: { id: "msg_s", usage: { input_tokens: 1 } },
+        },
+        { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } },
+      ]),
+    );
+
+    const contextWithTools: Context = {
+      messages: [{ role: "user", content: "test", timestamp: Date.now() }],
+      tools: [
+        {
+          name: "custom_tool",
+          description: "A tool with schema metadata",
+          parameters: {
+            $schema: "http://json-schema.org/draft-07/schema#",
+            $id: "http://example.com/schema",
+            type: "object",
+            properties: {
+              param1: { type: "string" },
+            },
+            required: ["param1"],
+          },
+        },
+      ],
+    };
+
+    const model = makeAnthropicModel({ id: "claude-opus-4-7", apiId: "claude-opus-4-7" });
+    await collectEvents(streamMaaS(model, contextWithTools));
+
+    expect(mocks.anthropicStream).toHaveBeenCalledOnce();
+    const passedTools = mocks.anthropicStream.mock.calls[0][0].tools;
+    expect(passedTools[0].input_schema).toEqual({
+      type: "object",
+      properties: {
+        param1: { type: "string" },
+      },
+      required: ["param1"],
+    });
+    expect(passedTools[0].input_schema).not.toHaveProperty("$schema");
+    expect(passedTools[0].input_schema).not.toHaveProperty("$id");
+  });
 });
 
 describe("streamMaaS — OpenAI-compat path", () => {

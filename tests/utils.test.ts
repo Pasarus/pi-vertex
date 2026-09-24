@@ -5,7 +5,9 @@ import {
   convertTools,
   convertToolsForGemini,
   mapStopReason,
+  requiresToolCallId,
   retainThoughtSignature,
+  sanitizeJsonSchema,
   sanitizeText,
 } from "../utils.js";
 
@@ -137,26 +139,70 @@ describe("convertToolsForGemini", () => {
     expect(convertToolsForGemini(undefined as any)).toBeUndefined();
   });
 
-  it("wraps tools in functionDeclarations", () => {
+  it("strips $schema and meta-declarations from parametersJsonSchema", () => {
     const tools = [
       {
-        name: "write",
-        description: "Write a file",
-        parameters: { type: "object", required: ["path"] },
+        name: "test",
+        description: "Test tool",
+        parameters: {
+          $schema: "http://json-schema.org/draft-07/schema#",
+          $id: "schema-id",
+          type: "object",
+          properties: {
+            arg: { type: "string" },
+          },
+        },
       },
     ];
 
     const result = convertToolsForGemini(tools);
-
-    expect(result).toHaveLength(1);
-    expect(result?.[0]).toEqual({
-      functionDeclarations: [
-        {
-          name: "write",
-          description: "Write a file",
-          parametersJsonSchema: { type: "object", required: ["path"] },
-        },
-      ],
+    expect(result?.[0].functionDeclarations[0].parametersJsonSchema).toEqual({
+      type: "object",
+      properties: {
+        arg: { type: "string" },
+      },
     });
+  });
+});
+
+describe("sanitizeJsonSchema", () => {
+  it("recursively removes meta-declarations", () => {
+    const schema = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      $id: "my-id",
+      $comment: "a comment",
+      type: "object",
+      properties: {
+        nested: {
+          $defs: {},
+          type: "string",
+        },
+      },
+    };
+    expect(sanitizeJsonSchema(schema)).toEqual({
+      type: "object",
+      properties: {
+        nested: {
+          type: "string",
+        },
+      },
+    });
+  });
+});
+
+describe("requiresToolCallId", () => {
+  it("returns true for Gemini 3 models", () => {
+    expect(requiresToolCallId("gemini-3-pro")).toBe(true);
+    expect(requiresToolCallId("gemini-3.5-flash")).toBe(true);
+  });
+
+  it("returns false for Gemini 2.5 models", () => {
+    expect(requiresToolCallId("gemini-2.5-pro")).toBe(false);
+    expect(requiresToolCallId("gemini-2.5-flash")).toBe(false);
+  });
+
+  it("returns true for Claude and GPT-OSS models", () => {
+    expect(requiresToolCallId("claude-opus-4-7")).toBe(true);
+    expect(requiresToolCallId("gpt-oss-120b")).toBe(true);
   });
 });
