@@ -106,7 +106,16 @@ describe("static models", () => {
     }
   });
 
-  it("registers Gemini 3.5 Flash with GA Vertex metadata", () => {
+  it("registers Gemini 4 Argon and Gemini 3.5 Flash with Vertex metadata", () => {
+    expect(getModelById("gemini-4-argon")).toMatchObject({
+      name: "Gemini 4 Argon",
+      apiId: "gemini-4-argon",
+      contextWindow: 1048576,
+      maxTokens: 65535,
+      reasoning: true,
+      tools: true,
+      cost: { input: 2.0, output: 10.0, cacheRead: 0.1, cacheWrite: 0 },
+    });
     expect(getModelById("gemini-3.5-flash")).toMatchObject({
       name: "Gemini 3.5 Flash",
       apiId: "gemini-3.5-flash",

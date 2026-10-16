@@ -64,7 +64,7 @@ Pi coding agent can pass tools and system instructions in two distinct represent
 - **Legacy Extended Thinking (Claude 4.5 and below)**:
   - Sends `{ type: "enabled", budget_tokens: budget, display: "summarized" }`.
 - **Gemini Thinking**:
-  - Gemini 3.x/3.5 Pro/Flash uses `thinkingConfig.thinkingLevel` (`"LOW"`, `"MEDIUM"`, `"HIGH"`).
+  - Gemini 3.x/3.5+ and Gemini 4+ (e.g. `gemini-4-argon`) use `thinkingConfig.thinkingLevel` (`"LOW"`, `"MEDIUM"`, `"HIGH"`).
   - Gemini 2.5 uses `thinkingConfig.thinkingBudget` (token counts).
 
 ### C. Multi-Turn Tool Call & History Replay
@@ -74,8 +74,8 @@ Pi coding agent can pass tools and system instructions in two distinct represent
   - Thinking blocks on assistant tool calls must be preserved: if `block.thinkingSignature` is present, keep the thinking block even if `block.thinking` is empty. Dropping it causes Anthropic to reject the request with `400: thinking blocks cannot be modified`.
   - Support `redacted_thinking`: replay as `{ type: "redacted_thinking", data: block.thinkingSignature }`.
   - Multimodal tool results: preserve `{ type: "image", source: { type: "base64", media_type, data } }` in `tool_result` content.
-- **Gemini 3 Tool Call Correlation**:
-  - Gemini 3 requires `id` on both `functionCall` and `functionResponse` parts (`requiresToolCallId(modelId)`).
+- **Gemini 3+ / 4+ Tool Call Correlation**:
+  - Gemini 3+ and Gemini 4+ require `id` on both `functionCall` and `functionResponse` parts (`requiresToolCallId(modelId)`).
   - For Gemini 2.5, `id` is omitted.
 - **JSON Schema Sanitization**:
   - Both Anthropic and Gemini Vertex APIs reject schema meta-declarations like `$schema`, `$id`, `$anchor`, `$defs`, etc.

@@ -1,6 +1,6 @@
 {
   "name": "@pasarus/pi-vertex",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "description": "Google Vertex AI provider for Pi coding agent with dynamic model discovery",
   "type": "module",
   "main": "index.ts",

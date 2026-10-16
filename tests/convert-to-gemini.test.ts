@@ -236,7 +236,7 @@ describe("convertToGeminiMessages", () => {
       });
     });
 
-    it("uses skip_thought_signature_validator and includes id for Gemini 3 without signature", () => {
+    it("uses skip_thought_signature_validator and includes id for Gemini 3 and Gemini 4 without signature", () => {
       const messages: Message[] = [
         assistant({
           content: [{ type: "toolCall", id: "tc-1", name: "read", arguments: {} }],
@@ -244,6 +244,12 @@ describe("convertToGeminiMessages", () => {
       ];
       const result = convertToGeminiMessages(messages, "gemini-3-pro");
       expect(result[0].parts[0]).toEqual({
+        functionCall: { id: "tc-1", name: "read", args: {} },
+        thoughtSignature: "skip_thought_signature_validator",
+      });
+
+      const result4 = convertToGeminiMessages(messages, "gemini-4-argon");
+      expect(result4[0].parts[0]).toEqual({
         functionCall: { id: "tc-1", name: "read", args: {} },
         thoughtSignature: "skip_thought_signature_validator",
       });
