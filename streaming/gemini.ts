@@ -19,10 +19,12 @@ import {
   calculateCost,
   convertToGeminiMessages,
   convertToolsForGemini,
+  getGeminiMajorVersion,
   resolveContextTools,
   resolveSystemPrompt,
   retainThoughtSignature,
   sanitizeText,
+  usesGeminiThinkingLevel,
 } from "../utils.js";
 
 // Module-level counter for generating unique tool call IDs (matches pi-mono pattern)
@@ -41,17 +43,21 @@ interface GeminiThinkingConfig {
   thinkingLevel?: ThinkingLevel;
 }
 
-function isGemini3ProModel(modelId: string): boolean {
-  return /gemini-3(?:\.\d+)?-pro/.test(modelId.toLowerCase());
+function supportsMinimalThinkingLevel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  if (/gemini-3(?:\.\d+)?-pro/.test(id)) return false;
+  if (/gemini-3\.[78]-flash/.test(id)) return false;
+  const majorVersion = getGeminiMajorVersion(id);
+  if (majorVersion !== undefined && majorVersion >= 4) return false;
+  return true;
 }
 
-function getGemini3ThinkingLevel(effort: string, modelId: string): ThinkingLevel {
-  if (isGemini3ProModel(modelId)) {
-    if (effort === "minimal" || effort === "low") return ThinkingLevel.LOW;
-    if (effort === "medium") return ThinkingLevel.MEDIUM;
-    return ThinkingLevel.HIGH;
+function getGeminiThinkingLevel(effort: string, modelId: string): ThinkingLevel {
+  const normalizedEffort = effort === "xhigh" || effort === "max" ? "high" : effort;
+  if (!supportsMinimalThinkingLevel(modelId) && normalizedEffort === "minimal") {
+    return ThinkingLevel.LOW;
   }
-  return THINKING_LEVEL_MAP[effort];
+  return THINKING_LEVEL_MAP[normalizedEffort] ?? ThinkingLevel.HIGH;
 }
 
 function mapGeminiStopReason(reason: string): "stop" | "length" | "toolUse" | "error" {
@@ -129,17 +135,18 @@ export function streamGemini(
 
       // Add thinking configuration (matches pi-mono's buildParams logic)
       if (model.reasoning) {
+        const useThinkingLevel = usesGeminiThinkingLevel(model.apiId);
         if (options?.reasoning) {
-          const effort = options.reasoning === "xhigh" ? "high" : options.reasoning;
-          const isGemini3 = model.apiId.startsWith("gemini-3");
-
           const thinkingConfig: GeminiThinkingConfig = { includeThoughts: true };
 
-          if (isGemini3) {
-            // Gemini 3 Pro does not support MINIMAL; Flash models do.
-            thinkingConfig.thinkingLevel = getGemini3ThinkingLevel(effort, model.apiId);
+          if (useThinkingLevel) {
+            thinkingConfig.thinkingLevel = getGeminiThinkingLevel(options.reasoning, model.apiId);
           } else {
             // Gemini 2.5 models use thinking budgets (token counts)
+            const effort =
+              options.reasoning === "xhigh" || options.reasoning === "max"
+                ? "high"
+                : options.reasoning;
             const budgets: Record<string, number> = {
               minimal: 128,
               low: 2048,
@@ -152,12 +159,11 @@ export function streamGemini(
           config.thinkingConfig = thinkingConfig;
         } else {
           // If no reasoning level is specified:
-          // - For Gemini 3.x/3.5 models, omit thinkingConfig entirely so Vertex AI uses
+          // - For Gemini 3+/4+ models, omit thinkingConfig entirely so Vertex AI uses
           //   the model's native default level (e.g. MEDIUM for 3.5, HIGH for others).
           // - For Gemini 2.5 models, apply a healthy thinking budget floor because
           //   thinking is disabled by default on 2.5.
-          const isGemini3 = model.apiId.startsWith("gemini-3");
-          if (!isGemini3) {
+          if (!useThinkingLevel) {
             config.thinkingConfig = {
               includeThoughts: true,
               thinkingBudget: model.apiId.includes("2.5-pro") ? 2048 : 1024,

@@ -57,9 +57,24 @@ export function retainThoughtSignature(
   return existing;
 }
 
-function getGeminiMajorVersion(modelId: string): number | undefined {
+export function getGeminiMajorVersion(modelId: string): number | undefined {
   const match = modelId.toLowerCase().match(/^gemini(?:-live)?-(\d+)/);
   return match ? Number.parseInt(match[1], 10) : undefined;
+}
+
+/**
+ * Whether a Gemini model uses discrete `thinkingLevel` instead of token-based `thinkingBudget`.
+ * Gemini 3+ and Gemini 4+ models (such as gemini-4-argon) use thinkingLevel.
+ */
+export function usesGeminiThinkingLevel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  const majorVersion = getGeminiMajorVersion(id);
+  return (
+    (majorVersion !== undefined && majorVersion >= 3) ||
+    id === "gemini-flash-latest" ||
+    id === "gemini-flash-lite-latest" ||
+    /gemma-?4/.test(id)
+  );
 }
 
 function supportsMultimodalFunctionResponse(modelId: string): boolean {
@@ -191,7 +206,8 @@ type GeminiContent = {
  */
 export function convertToGeminiMessages(messages: Message[], modelId: string): GeminiContent[] {
   const result: GeminiContent[] = [];
-  const isGemini3 = modelId.startsWith("gemini-3");
+  const geminiMajorVersion = getGeminiMajorVersion(modelId);
+  const requiresThoughtSignature = geminiMajorVersion !== undefined && geminiMajorVersion >= 3;
   let pendingToolCalls: ToolCall[] = [];
   let existingToolResultIds = new Set<string>();
 
@@ -352,8 +368,8 @@ export function convertToGeminiMessages(messages: Message[], modelId: string): G
           };
           if (thoughtSig) {
             part.thoughtSignature = thoughtSig;
-          } else if (isGemini3) {
-            // Gemini 3 requires thoughtSignature on all functionCall parts.
+          } else if (requiresThoughtSignature) {
+            // Gemini 3+ requires thoughtSignature on all functionCall parts.
             // For cross-provider tool calls (or rare same-provider calls without signatures),
             // use the documented escape hatch to bypass validation.
             // See: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures

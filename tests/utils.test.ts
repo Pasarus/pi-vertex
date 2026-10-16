@@ -9,6 +9,7 @@ import {
   retainThoughtSignature,
   sanitizeJsonSchema,
   sanitizeText,
+  usesGeminiThinkingLevel,
 } from "../utils.js";
 
 describe("sanitizeText", () => {
@@ -191,9 +192,10 @@ describe("sanitizeJsonSchema", () => {
 });
 
 describe("requiresToolCallId", () => {
-  it("returns true for Gemini 3 models", () => {
+  it("returns true for Gemini 3+ and Gemini 4+ models", () => {
     expect(requiresToolCallId("gemini-3-pro")).toBe(true);
     expect(requiresToolCallId("gemini-3.5-flash")).toBe(true);
+    expect(requiresToolCallId("gemini-4-argon")).toBe(true);
   });
 
   it("returns false for Gemini 2.5 models", () => {
@@ -204,5 +206,21 @@ describe("requiresToolCallId", () => {
   it("returns true for Claude and GPT-OSS models", () => {
     expect(requiresToolCallId("claude-opus-4-7")).toBe(true);
     expect(requiresToolCallId("gpt-oss-120b")).toBe(true);
+  });
+});
+
+describe("usesGeminiThinkingLevel", () => {
+  it("returns true for Gemini 3+ and Gemini 4+ models", () => {
+    expect(usesGeminiThinkingLevel("gemini-3-flash-preview")).toBe(true);
+    expect(usesGeminiThinkingLevel("gemini-3.1-pro-preview")).toBe(true);
+    expect(usesGeminiThinkingLevel("gemini-3.5-flash")).toBe(true);
+    expect(usesGeminiThinkingLevel("gemini-3.8-flash")).toBe(true);
+    expect(usesGeminiThinkingLevel("gemini-4-argon")).toBe(true);
+  });
+
+  it("returns false for Gemini 2.5 and 2.0 models", () => {
+    expect(usesGeminiThinkingLevel("gemini-2.5-pro")).toBe(false);
+    expect(usesGeminiThinkingLevel("gemini-2.5-flash")).toBe(false);
+    expect(usesGeminiThinkingLevel("gemini-2.0-flash")).toBe(false);
   });
 });

@@ -115,6 +115,42 @@ describe("streamGemini", () => {
     expect(mocks.generateContentStream.mock.calls[0][0].config).not.toHaveProperty(
       "thinkingConfig",
     );
+
+    mocks.generateContentStream.mockClear();
+
+    await collectEvents(
+      streamGemini(makeModel({ id: "gemini-4-argon", apiId: "gemini-4-argon" }), baseContext),
+    );
+
+    expect(mocks.generateContentStream.mock.calls[0][0].config).not.toHaveProperty(
+      "thinkingConfig",
+    );
+  });
+
+  it("maps Gemini 4 Argon thinking levels to supported Vertex values (no thinkingBudget)", async () => {
+    await collectEvents(
+      streamGemini(makeModel({ id: "gemini-4-argon", apiId: "gemini-4-argon" }), baseContext, {
+        reasoning: "minimal",
+      }),
+    );
+
+    expect(mocks.generateContentStream.mock.calls[0][0].config.thinkingConfig).toEqual({
+      includeThoughts: true,
+      thinkingLevel: "LOW",
+    });
+
+    mocks.generateContentStream.mockClear();
+
+    await collectEvents(
+      streamGemini(makeModel({ id: "gemini-4-argon", apiId: "gemini-4-argon" }), baseContext, {
+        reasoning: "high",
+      }),
+    );
+
+    expect(mocks.generateContentStream.mock.calls[0][0].config.thinkingConfig).toEqual({
+      includeThoughts: true,
+      thinkingLevel: "HIGH",
+    });
   });
 
   it("maps Gemini 3 Pro thinking levels to supported Vertex values", async () => {

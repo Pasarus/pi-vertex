@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.4] - 2026-10-16
+### Fixed
+- **Gemini 4 (`gemini-4-argon`) thinking config & tool replay**: Replaced `startsWith("gemini-3")` checks in `streaming/gemini.ts` and `utils.ts` with `usesGeminiThinkingLevel(modelId)` and `getGeminiMajorVersion(modelId) >= 3`. Gemini 4+ models now omit `thinkingBudget` when no reasoning level is specified, send `thinkingConfig.thinkingLevel` (`LOW`/`MEDIUM`/`HIGH`) when reasoning is requested (mapping `minimal` to `LOW`), and include `skip_thought_signature_validator` fallback on unsigned tool calls.
+
+### Added
+- Static model definitions in `models/gemini.ts` for `gemini-4-argon`, `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`, and `gemini-3.5-flash-lite`.
+
 ## [2.1.3] - 2026-09-24
 ### Fixed
 - **Claude adaptive thinking for Claude 4.6+, 4.7+, 4.8, 5+**: Fixed `thinking.type.enabled is not supported for this model` 400 error by sending `{ type: "adaptive", display: "summarized" }` with `output_config: { effort }`. Added `isAdaptiveThinking` helper and set `adaptiveThinking: true` in publisher defaults so dynamically discovered Anthropic models automatically use adaptive thinking.
